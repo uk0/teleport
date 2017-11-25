@@ -19,6 +19,7 @@ package auth
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -38,6 +39,7 @@ import (
 	"github.com/gravitational/teleport/lib/httplib"
 	"github.com/gravitational/teleport/lib/services"
 	"github.com/gravitational/teleport/lib/session"
+	"github.com/gravitational/teleport/lib/utils"
 	"github.com/gravitational/trace"
 
 	log "github.com/sirupsen/logrus"
@@ -61,6 +63,7 @@ type Dialer func(network, addr string) (net.Conn, error)
 // tunnel first, and then do HTTP-over-SSH. This client is wrapped by auth.TunClient
 // in lib/auth/tun.go
 type Client struct {
+	dialContext dialContext
 	roundtrip.Client
 	transport *http.Transport
 }
@@ -71,6 +74,54 @@ func NewTracer() roundtrip.RequestTracer {
 		return roundtrip.NewWriterTracer(log.StandardLogger().Writer())
 	}
 	return roundtrip.NewNopTracer()
+}
+
+type dialContext func(in context.Context, network, _ string) (net.Conn, error)
+
+// NewTLSClient returns new client using TLS mutual authentication
+func NewTLSClient(addrs []utils.NetAddr, cfg *tls.Config) (*Client, error) {
+	dialer := net.Dialer{
+		Timeout:   defaults.DefaultDialTimeout,
+		KeepAlive: defaults.ReverseTunnelAgentHeartbeatPeriod,
+	}
+	dialContext := func(in context.Context, network, _ string) (net.Conn, error) {
+		var err error
+		var conn net.Conn
+		for _, addr := range addrs {
+			conn, err = dialer.DialContext(in, network, addr.Addr)
+			if err == nil {
+				return conn, nil
+			}
+		}
+		return conn, nil
+	}
+	transport := &http.Transport{
+		// notice that below roundtrip.Client is passed
+		// teleport.APIEndpoint as an address for the API server, this is
+		// to make sure client verifies the DNS name of the API server
+		// custom DialContext overrrides this DNS name to the real address
+		// in addition this dialer tries multiple adresses if provided
+		DialContext:           dialContext,
+		ResponseHeaderTimeout: defaults.DefaultDialTimeout,
+		TLSClientConfig:       cfg,
+		MaxIdleConnsPerHost:   defaults.HTTPIdleConnsPerHost,
+		// IdleConnTimeout defines the maximum amount of time before idle connections
+		// are closed. Leaving this unset will lead to connections open forever and
+		// will cause memory leaks in a long running process
+		IdleConnTimeout: defaults.HTTPIdleTimeout,
+	}
+
+	roundtripClient, err := roundtrip.NewClient("https://"+teleport.APIDomain, CurrentVersion, roundtrip.HTTPClient(&http.Client{
+		Transport: transport,
+	}))
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	return &Client{
+		dialContext: dialContext,
+		Client:      *roundtripClient,
+		transport:   transport,
+	}, nil
 }
 
 // NewAuthClient returns a new instance of the client which talks to
@@ -101,6 +152,20 @@ func NewClient(addr string, dialer Dialer, params ...roundtrip.ClientParam) (*Cl
 		Client:    *c,
 		transport: transport,
 	}, nil
+}
+
+// GetDialer returns dialer that will connect to auth server API
+func (c *Client) GetDialer() AccessPointDialer {
+	return func(ctx context.Context) (conn net.Conn, err error) {
+		return c.dialContext(ctx, "tcp", teleport.APIDomain)
+	}
+}
+
+// GetAgent creates an SSH key agent (similar object to what CLI uses), this
+// key agent fetches user keys directly from the auth server using a custom channel
+// created via "ReqWebSessionAgent" reguest
+func (c *Client) GetAgent() (AgentCloser, error) {
+	panic("not implemented")
 }
 
 func (c *Client) GetTransport() *http.Transport {
@@ -340,6 +405,25 @@ func (c *Client) RegisterUsingToken(token, hostID string, nodeName string, role 
 		return nil, trace.Wrap(err)
 	}
 
+	var keys PackedKeys
+	if err := json.Unmarshal(out.Bytes(), &keys); err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	return &keys, nil
+}
+
+// RenewCredentials returns a new set of credentials associated
+// with the server with the same privileges
+func (c *Client) GenerateServerKeys(hostID string, nodeName string, roles teleport.Roles) (*PackedKeys, error) {
+	out, err := c.PostJSON(c.Endpoint("server", "credentials"), generateServerKeysReq{
+		HostID:   hostID,
+		NodeName: nodeName,
+		Roles:    roles,
+	})
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
 	var keys PackedKeys
 	if err := json.Unmarshal(out.Bytes(), &keys); err != nil {
 		return nil, trace.Wrap(err)
@@ -1886,4 +1970,9 @@ type ClientI interface {
 
 	ValidateTrustedCluster(*ValidateTrustedClusterRequest) (*ValidateTrustedClusterResponse, error)
 	GetDomainName() (string, error)
+	// GenerateServerKeys generates new host private keys and certificates (signed
+	// by the host certificate authority) for a node
+	GenerateServerKeys(hostID string, nodeName string, roles teleport.Roles) (*PackedKeys, error)
+	// GetDialer returns dialer that will connect to auth server API
+	GetDialer() AccessPointDialer
 }

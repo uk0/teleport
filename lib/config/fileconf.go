@@ -696,6 +696,8 @@ type KeyPair struct {
 	PrivateKey string `yaml:"private_key"`
 	// Cert is certificate in OpenSSH authorized keys format
 	Cert string `yaml:"cert"`
+	// TLSCert is TLS certificate in PEM format
+	TLSCert string `yaml:"tls_cert"`
 }
 
 // Identity parses keypair into auth server identity
@@ -719,7 +721,7 @@ func (k *KeyPair) Identity() (*auth.Identity, error) {
 	} else {
 		certBytes = []byte(k.Cert)
 	}
-	return auth.ReadIdentityFromKeyPair(keyBytes, certBytes)
+	return auth.ReadIdentityFromKeyPair(keyBytes, certBytes, []byte(k.TLSCert))
 }
 
 // Authority is a host or user certificate authority that

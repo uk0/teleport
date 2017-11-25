@@ -66,7 +66,7 @@ func (a *AuthCommand) Initialize(app *kingpin.Application, config *service.Confi
 
 // TryRun takes the CLI command as an argument (like "auth gen") and executes it
 // or returns match=false if 'cmd' does not belong to it
-func (a *AuthCommand) TryRun(cmd string, client *auth.TunClient) (match bool, err error) {
+func (a *AuthCommand) TryRun(cmd string, client auth.ClientI) (match bool, err error) {
 	switch cmd {
 	case a.authGenerate.FullCommand():
 		err = a.GenerateKeys()
@@ -84,7 +84,7 @@ func (a *AuthCommand) TryRun(cmd string, client *auth.TunClient) (match bool, er
 // ExportAuthorities outputs the list of authorities in OpenSSH compatible formats
 // If --type flag is given, only prints keys for CAs of this type, otherwise
 // prints all keys
-func (a *AuthCommand) ExportAuthorities(client *auth.TunClient) error {
+func (a *AuthCommand) ExportAuthorities(client auth.ClientI) error {
 	var typesToExport []services.CertAuthType
 
 	// if no --type flag is given, export all types
@@ -198,7 +198,7 @@ func (a *AuthCommand) GenerateKeys() error {
 }
 
 // GenerateAndSignKeys generates a new keypair and signs it for role
-func (a *AuthCommand) GenerateAndSignKeys(clusterApi *auth.TunClient) error {
+func (a *AuthCommand) GenerateAndSignKeys(clusterApi auth.ClientI) error {
 	// parse compatibility parameter
 	compatibility, err := utils.CheckCompatibilityFlag(a.compatibility)
 	if err != nil {
@@ -254,7 +254,7 @@ func userCAFormat(ca services.CertAuthority, keyBytes []byte) (string, error) {
 //    @cert-authority *.cluster-a ssh-rsa AAA... type=host
 //
 // URL encoding is used to pass the CA type and allowed logins into the comment field.
-func hostCAFormat(ca services.CertAuthority, keyBytes []byte, client *auth.TunClient) (string, error) {
+func hostCAFormat(ca services.CertAuthority, keyBytes []byte, client auth.ClientI) (string, error) {
 	comment := url.Values{
 		"type": []string{string(ca.GetType())},
 	}

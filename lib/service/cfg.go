@@ -39,7 +39,7 @@ import (
 )
 
 // Config structure is used to initialize _all_ services Teleporot can run.
-// Some settings are globl (like DataDir) while others are grouped into
+// Some settings are global (like DataDir) while others are grouped into
 // sections, like AuthConfig
 type Config struct {
 	// DataDir provides directory where teleport stores it's permanent state

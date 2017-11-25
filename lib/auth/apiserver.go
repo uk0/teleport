@@ -110,6 +110,9 @@ func NewAPIServer(config *APIConfig) http.Handler {
 	srv.DELETE("/:version/tunnelconnections/:cluster", srv.withAuth(srv.deleteTunnelConnections))
 	srv.DELETE("/:version/tunnelconnections", srv.withAuth(srv.deleteAllTunnelConnections))
 
+	// Server Credentials
+	srv.POST("/:version/server/credentials", srv.withAuth(srv.generateServerKeys))
+
 	// Reverse tunnels
 	srv.POST("/:version/reversetunnels", srv.withAuth(srv.upsertReverseTunnel))
 	srv.GET("/:version/reversetunnels", srv.withAuth(srv.getReverseTunnels))
@@ -865,6 +868,26 @@ func (s *APIServer) registerNewAuthServer(auth ClientI, w http.ResponseWriter, r
 		return nil, trace.Wrap(err)
 	}
 	return message("ok"), nil
+}
+
+type generateServerKeysReq struct {
+	HostID   string         `json:"host_id"`
+	NodeName string         `json:"node_name"`
+	Roles    teleport.Roles `json:"roles"`
+}
+
+func (s *APIServer) generateServerKeys(auth ClientI, w http.ResponseWriter, r *http.Request, _ httprouter.Params, version string) (interface{}, error) {
+	var req *generateServerKeysReq
+	if err := httplib.ReadJSON(r, &req); err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	keys, err := auth.GenerateServerKeys(req.HostID, req.NodeName, req.Roles)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	return keys, nil
 }
 
 type upsertCertAuthorityRawReq struct {

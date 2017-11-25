@@ -158,6 +158,10 @@ func (s *AuthTunnel) Addr() string {
 	return s.sshServer.Addr()
 }
 
+func (s *AuthTunnel) Serve(l net.Listener) error {
+	return s.sshServer.Serve(l)
+}
+
 func (s *AuthTunnel) Start() error {
 	return s.sshServer.Start()
 }
@@ -867,7 +871,7 @@ func (c *TunClient) GetDialer() AccessPointDialer {
 	addrNetwork := c.staticAuthServers[0].AddrNetwork
 	const dialRetryTimes = 3
 
-	return func() (conn net.Conn, err error) {
+	return func(ctx context.Context) (conn net.Conn, err error) {
 		for attempt := 0; attempt < dialRetryTimes; attempt++ {
 			conn, err = c.Dial(addrNetwork, "accesspoint:0")
 			if err == nil {
@@ -1135,5 +1139,5 @@ const (
 	AuthValidateTrustedCluster = "trusted-cluster"
 )
 
-// AccessPointDialer dials to auth access point  remote HTTP api
-type AccessPointDialer func() (net.Conn, error)
+// AccessPointDialer dials to auth access point  remote HTTP API
+type AccessPointDialer func(context.Context) (net.Conn, error)

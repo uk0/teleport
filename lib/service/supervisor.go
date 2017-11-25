@@ -64,7 +64,8 @@ type Supervisor interface {
 type LocalSupervisor struct {
 	state int
 	sync.Mutex
-	wg           *sync.WaitGroup
+	wg *sync.WaitGroup
+	*log.Entry
 	services     []*Service
 	errors       []error
 	events       map[string]Event
@@ -76,6 +77,9 @@ type LocalSupervisor struct {
 // NewSupervisor returns new instance of initialized supervisor
 func NewSupervisor() Supervisor {
 	srv := &LocalSupervisor{
+		Entry: log.WithFields(log.Fields{
+			trace.Component: "supervisor",
+		}),
 		services:     []*Service{},
 		wg:           &sync.WaitGroup{},
 		events:       map[string]Event{},
@@ -99,11 +103,10 @@ func (e *Event) String() string {
 }
 
 func (s *LocalSupervisor) Register(srv Service) {
+	s.Debugf("service %v added (%v)", srv, len(s.services))
 	s.Lock()
 	defer s.Unlock()
 	s.services = append(s.services, &srv)
-
-	log.Debugf("[SUPERVISOR] Service %v added (%v)", srv, len(s.services))
 
 	if s.state == stateStarted {
 		s.serve(&srv)
@@ -132,7 +135,7 @@ func (s *LocalSupervisor) serve(srv *Service) {
 				break
 			}
 		}
-		log.Debugf("[SUPERVISOR] Service %v is done (%v)", *srv, len(s.services))
+		s.Debugf("service %v is done (%v)", *srv, len(s.services))
 	}
 
 	s.wg.Add(1)
@@ -140,7 +143,7 @@ func (s *LocalSupervisor) serve(srv *Service) {
 		defer s.wg.Done()
 		defer removeService()
 
-		log.Debugf("[SUPERVISOR] Service %v started (%v)", *srv, s.ServiceCount())
+		s.Debugf("service %v is started (%v)", *srv, s.ServiceCount())
 		err := (*srv).Serve()
 		if err != nil {
 			utils.FatalError(err)
@@ -154,7 +157,7 @@ func (s *LocalSupervisor) Start() error {
 	s.state = stateStarted
 
 	if len(s.services) == 0 {
-		log.Warning("supervisor.Start(): nothing to run")
+		s.Warning("Start(): nothing to run")
 		return nil
 	}
 
@@ -182,7 +185,7 @@ func (s *LocalSupervisor) BroadcastEvent(event Event) {
 	s.Lock()
 	defer s.Unlock()
 	s.events[event.Name] = event
-	log.Debugf("BroadcastEvent: %v", &event)
+	s.Debugf("broadcast event: %v", &event)
 
 	go func() {
 		s.eventsC <- event

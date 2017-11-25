@@ -7,6 +7,7 @@ import (
 
 	"github.com/gravitational/teleport"
 	"github.com/gravitational/teleport/lib/defaults"
+	"github.com/gravitational/teleport/lib/tlsca"
 	"github.com/gravitational/teleport/lib/utils"
 
 	"github.com/gravitational/trace"
@@ -172,6 +173,16 @@ type CertAuthority interface {
 	V2() *CertAuthorityV2
 	// String returns human readable version of the CertAuthority
 	String() string
+	// TLSCA returns TLS certificate authority
+	TLSCA() (*tlsca.CertAuthority, error)
+	// SetTLSPrivateKey returns TLS private key
+	SetTLSPrivateKey(key string)
+	// GetTLSPrivateKey returns TLS private key
+	GetTLSPrivateKey() string
+	// GetTLSCert returns TLS cert
+	GetTLSCert() string
+	// SetTLSCert sets TLS cert
+	SetTLSCert(cert string)
 }
 
 // NewCertAuthority returns new cert authority
@@ -209,7 +220,7 @@ func CertAuthoritiesToV1(in []CertAuthority) ([]CertAuthorityV1, error) {
 	return out, nil
 }
 
-// CertAuthorityV2 is version 1 resource spec for Cert Authority
+// CertAuthorityV2 is version 2 resource spec for Cert Authority
 type CertAuthorityV2 struct {
 	// Kind is a resource kind
 	Kind string `json:"kind"`
@@ -222,6 +233,34 @@ type CertAuthorityV2 struct {
 	// rawObject is object that is raw object stored in DB
 	// without any conversions applied, used in migrations
 	rawObject interface{}
+}
+
+// TLSCA returns TLS certificate authority
+func (c *CertAuthorityV2) TLSCA() (*tlsca.CertAuthority, error) {
+	if len(c.Spec.TLSCert) == 0 {
+		return nil, trace.BadParameter("no TLS cert found for CA")
+	}
+	return tlsca.New([]byte(c.Spec.TLSCert), []byte(c.Spec.TLSPrivateKey))
+}
+
+// SetTLSPrivateKey returns TLS private key
+func (c *CertAuthorityV2) SetTLSPrivateKey(key string) {
+	c.Spec.TLSPrivateKey = key
+}
+
+// GetTLSPrivateKey returns TLS private key
+func (c *CertAuthorityV2) GetTLSPrivateKey() string {
+	return c.Spec.TLSPrivateKey
+}
+
+// GetTLSCert returns TLS cert
+func (c *CertAuthorityV2) GetTLSCert() string {
+	return c.Spec.TLSCert
+}
+
+// SetTLSCert sets TLS cert
+func (c *CertAuthorityV2) SetTLSCert(cert string) {
+	c.Spec.TLSCert = cert
 }
 
 // GetMetadata returns object metadata
@@ -448,6 +487,10 @@ type CertAuthoritySpecV2 struct {
 	Roles []string `json:"roles,omitempty"`
 	// RoleMap specifies role mappings to remote roles
 	RoleMap RoleMap `json:"role_map,omitempty"`
+	// TLSCert is a TLS certificate
+	TLSCert string `json:"tls_cert,omitempty"`
+	// TLSPrivateKey is a TLS private key
+	TLSPrivateKey string `json:"tls_private_key,omitempty"`
 }
 
 // CertAuthoritySpecV2Schema is JSON schema for cert authority V2
@@ -476,6 +519,8 @@ const CertAuthoritySpecV2Schema = `{
         "type": "string"
       }
     },
+    "tls_cert": {"type": "string"},
+    "tls_private_key": {"type": "string"},
     "role_map": %v
   }
 }`

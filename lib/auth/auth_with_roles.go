@@ -18,6 +18,7 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/url"
 	"time"
@@ -192,6 +193,28 @@ func (a *AuthWithRoles) RegisterUsingToken(token, hostID string, nodeName string
 func (a *AuthWithRoles) RegisterNewAuthServer(token string) error {
 	// tokens have authz mechanism  on their own, no need to check
 	return a.authServer.RegisterNewAuthServer(token)
+}
+
+// GenerateServerKeys generates new host private keys and certificates (signed
+// by the host certificate authority) for a node.
+func (a *AuthWithRoles) GenerateServerKeys(hostID string, nodeName string, roles teleport.Roles) (*PackedKeys, error) {
+	clusterName, err := a.authServer.GetDomainName()
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	// username is hostID + cluster name, so make sure server requests new keys for itself
+	if a.user.GetName() != fmt.Sprintf("%v.%v", hostID, clusterName) {
+		return nil, trace.AccessDenied("username mistmatch %q", a.user.GetName())
+	}
+	existingRoles, err := teleport.NewRoles(a.user.GetRoles())
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	// prohibit privilege escalations through role changes
+	if !existingRoles.Equals(roles) {
+		return nil, trace.AccessDenied("roles do not match")
+	}
+	return a.authServer.GenerateServerKeys(hostID, nodeName, roles)
 }
 
 func (a *AuthWithRoles) UpsertNode(s services.Server) error {
@@ -998,6 +1021,10 @@ func (a *AuthWithRoles) DeleteAllTunnelConnections() error {
 
 func (a *AuthWithRoles) Close() error {
 	return a.authServer.Close()
+}
+
+func (a *AuthWithRoles) GetDialer() AccessPointDialer {
+	return nil
 }
 
 func (a *AuthWithRoles) WaitForDelivery(context.Context) error {

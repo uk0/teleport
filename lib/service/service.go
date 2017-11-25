@@ -1,5 +1,5 @@
 /*
-Copyright 2015 Gravitational, Inc.
+Copyright 2015-2017 Gravitational, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -44,6 +44,7 @@ import (
 	"github.com/gravitational/teleport/lib/defaults"
 	"github.com/gravitational/teleport/lib/events"
 	"github.com/gravitational/teleport/lib/limiter"
+	"github.com/gravitational/teleport/lib/multiplexer"
 	"github.com/gravitational/teleport/lib/reversetunnel"
 	"github.com/gravitational/teleport/lib/services"
 	"github.com/gravitational/teleport/lib/session"
@@ -90,12 +91,13 @@ type RoleConfig struct {
 // to other parts of the cluster: client and identity
 type Connector struct {
 	Identity *auth.Identity
-	Client   *auth.TunClient
+	Client   *auth.Client
 }
 
 // TeleportProcess structure holds the state of the Teleport daemon, controlling
 // execution and configuration of the teleport services: ssh, auth and proxy.
 type TeleportProcess struct {
+	*log.Entry
 	clockwork.Clock
 	sync.Mutex
 	Supervisor
@@ -137,6 +139,20 @@ func (process *TeleportProcess) findStaticIdentity(id auth.IdentityID) (*auth.Id
 	return nil, trace.NotFound("identity %v not found", &id)
 }
 
+// readIdentity reads identity from disk and resets the local state
+func (process *TeleportProcess) readIdentity(role teleport.Role) (*auth.Identity, error) {
+	process.Lock()
+	defer process.Unlock()
+
+	id := auth.IdentityID{HostUUID: process.Config.HostUUID, Role: role}
+	identity, err := auth.ReadIdentity(process.Config.DataDir, id)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	process.Identities[role] = identity
+	return identity, nil
+}
+
 // GetIdentity returns the process identity (credentials to the auth server) for a given
 // teleport Role. A teleport process can have any combination of 3 roles: auth, node, proxy
 // and they have their own identities
@@ -155,7 +171,7 @@ func (process *TeleportProcess) GetIdentity(role teleport.Role) (i *auth.Identit
 	i, err = auth.ReadIdentity(process.Config.DataDir, id)
 	if err != nil {
 		if trace.IsNotFound(err) {
-			// try to locate static identity provide in the file
+			// try to locate static identity provided in the file
 			i, err = process.findStaticIdentity(id)
 			if err != nil {
 				return nil, trace.Wrap(err)
@@ -179,24 +195,48 @@ func (process *TeleportProcess) connectToAuthService(role teleport.Role) (*Conne
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	storage := utils.NewFileAddrStorage(
-		filepath.Join(process.Config.DataDir, "authservers.json"))
+	l := log.WithFields(log.Fields{trace.Component: string(role)})
+	tlsConfig, err := identity.TLSConfig()
+	if err != nil {
+		if !trace.IsNotFound(err) {
+			return nil, trace.Wrap(err)
+		}
+		// connect using legacy SSH and get new set of TLS credentials
+		l.Infof("connecting to the cluster to fetch TLS certificates")
+		storage := utils.NewFileAddrStorage(
+			filepath.Join(process.Config.DataDir, "authservers.json"))
 
-	authUser := identity.Cert.ValidPrincipals[0]
-	authClient, err := auth.NewTunClient(
-		string(role),
-		process.Config.AuthServers,
-		authUser,
-		[]ssh.AuthMethod{ssh.PublicKeys(identity.KeySigner)},
-		auth.TunClientStorage(storage),
-	)
-	// success?
+		authUser := identity.Cert.ValidPrincipals[0]
+		authClient, err := auth.NewTunClient(
+			string(role),
+			process.Config.AuthServers,
+			authUser,
+			[]ssh.AuthMethod{ssh.PublicKeys(identity.KeySigner)},
+			auth.TunClientStorage(storage),
+			auth.TunDisableRefresh(),
+		)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		defer authClient.Close()
+		if err := auth.ReRegister(process.Config.DataDir, authClient, identity.ID); err != nil {
+			return nil, trace.Wrap(err)
+		}
+		if identity, err = process.readIdentity(role); err != nil {
+			return nil, trace.Wrap(err)
+		}
+		tlsConfig, err = identity.TLSConfig()
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		l.Infof("received new TLS identity")
+	}
+	client, err := auth.NewTLSClient(process.Config.AuthServers, tlsConfig)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 	// success ? we're logged in!
-	log.Infof("[Node] %s connected to the cluster", authUser)
-	return &Connector{Client: authClient, Identity: identity}, nil
+	return &Connector{Client: client, Identity: identity}, nil
 }
 
 // NewTeleport takes the daemon configuration, instantiates all required services
@@ -417,6 +457,24 @@ func (process *TeleportProcess) initAuthService(authority auth.Authority) error 
 		return trace.Wrap(err)
 	}
 
+	// auth server listens on SSH and TLS, reusing the same socket
+	listener, err := net.Listen("tcp", cfg.Auth.SSHAddr.Addr)
+	if err != nil {
+		utils.Consolef(cfg.Console, "[AUTH]  failed to bind to address %v, exiting", cfg.Auth.SSHAddr.Addr, err)
+		return trace.Wrap(err)
+	}
+	process.onExit(func(payload interface{}) {
+		log.Debugf("closing listener: %v", listener.Addr())
+		listener.Close()
+	})
+	mux, err := multiplexer.New(multiplexer.Config{
+		Listener: listener,
+	})
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	go mux.Serve()
+
 	// Register an SSH endpoint which is used to create an SSH tunnel to send HTTP
 	// requests to the Auth API
 	var authTunnel *auth.AuthTunnel
@@ -432,7 +490,7 @@ func (process *TeleportProcess) initAuthService(authority auth.Authority) error 
 			utils.Consolef(cfg.Console, "[AUTH] Error: %v", err)
 			return trace.Wrap(err)
 		}
-		if err := authTunnel.Start(); err != nil {
+		if err := authTunnel.Serve(mux.SSH()); err != nil {
 			if askedToExit {
 				log.Infof("[AUTH] Auth Tunnel exited")
 				return nil
@@ -440,6 +498,13 @@ func (process *TeleportProcess) initAuthService(authority auth.Authority) error 
 			utils.Consolef(cfg.Console, "[AUTH] Error: %v", err)
 			return trace.Wrap(err)
 		}
+		return nil
+	})
+
+	// Register TLS endpoint of the auth service
+	panic("do add TLS")
+	process.RegisterFunc(func() error {
+		// TLSAUTH
 		return nil
 	})
 
@@ -508,6 +573,7 @@ func (process *TeleportProcess) initAuthService(authority auth.Authority) error 
 	// execute this when process is asked to exit:
 	process.onExit(func(payload interface{}) {
 		askedToExit = true
+		mux.Close()
 		authTunnel.Close()
 		log.Infof("[AUTH] auth service exited")
 	})
@@ -638,7 +704,7 @@ func (process *TeleportProcess) RegisterWithAuthServer(token string, role telepo
 	// this means the server has not been initialized yet, we are starting
 	// the registering client that attempts to connect to the auth server
 	// and provision the keys
-	var authClient *auth.TunClient
+	var authClient *auth.Client
 	process.RegisterFunc(func() error {
 		retryTime := defaults.ServerHeartbeatTTL / 3
 		for {

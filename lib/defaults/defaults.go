@@ -257,6 +257,9 @@ var (
 
 	// LicenseFile is the default name of the license file
 	LicenseFile = "license.pem"
+
+	// CACertFile is the default name of the certificate authority file to watch
+	CACertFile = "ca.cert"
 )
 
 const (

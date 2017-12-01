@@ -31,7 +31,6 @@ import (
 	"github.com/gravitational/teleport/lib/utils"
 
 	"github.com/gravitational/trace"
-	log "github.com/sirupsen/logrus"
 	"github.com/tstranex/u2f"
 )
 

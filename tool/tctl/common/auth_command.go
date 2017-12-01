@@ -50,7 +50,7 @@ func (a *AuthCommand) Initialize(app *kingpin.Application, config *service.Confi
 	a.authExport.Flag("keys", "if set, will print private keys").BoolVar(&a.exportPrivateKeys)
 	a.authExport.Flag("fingerprint", "filter authority by fingerprint").StringVar(&a.exportAuthorityFingerprint)
 	a.authExport.Flag("compat", "export cerfiticates compatible with specific version of Teleport").StringVar(&a.compatVersion)
-	a.authExport.Flag("type", "certificate type: 'user' or 'host'").StringVar(&a.authType)
+	a.authExport.Flag("type", "certificate type: 'user', 'host' or 'tls'").StringVar(&a.authType)
 
 	a.authGenerate = auth.Command("gen", "Generate a new SSH keypair").Hidden()
 	a.authGenerate.Flag("pub-key", "path to the public key").Required().StringVar(&a.genPubPath)
@@ -86,6 +86,25 @@ func (a *AuthCommand) TryRun(cmd string, client auth.ClientI) (match bool, err e
 // prints all keys
 func (a *AuthCommand) ExportAuthorities(client auth.ClientI) error {
 	var typesToExport []services.CertAuthType
+
+	// this means to export TLS authority
+	if a.authType == "tls" {
+		clusterName, err := client.GetDomainName()
+		if err != nil {
+			return trace.Wrap(err)
+		}
+		certAuthority, err := client.GetCertAuthority(
+			services.CertAuthID{Type: services.HostCA, DomainName: clusterName},
+			a.exportPrivateKeys)
+		if err != nil {
+			return trace.Wrap(err)
+		}
+		if a.exportPrivateKeys {
+			fmt.Println(certAuthority.GetTLSPrivateKey())
+		}
+		fmt.Println(certAuthority.GetTLSCert())
+		return nil
+	}
 
 	// if no --type flag is given, export all types
 	if a.authType == "" {

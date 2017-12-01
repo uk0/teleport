@@ -35,7 +35,6 @@ import (
 
 	"github.com/gravitational/trace"
 	"github.com/pquerna/otp/totp"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/tstranex/u2f"
 )

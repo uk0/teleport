@@ -35,7 +35,6 @@ import (
 	"github.com/gravitational/teleport/lib/utils"
 
 	"github.com/ghodss/yaml"
-	log "github.com/sirupsen/logrus"
 )
 
 // Config structure is used to initialize _all_ services Teleporot can run.
@@ -301,7 +300,7 @@ func ApplyDefaults(cfg *Config) {
 	hostname, err := os.Hostname()
 	if err != nil {
 		hostname = "localhost"
-		log.Errorf("Failed to determine hostname: %v", err)
+		log.Errorf("Failed to determine hostname: %v.", err)
 	}
 
 	// global defaults

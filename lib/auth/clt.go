@@ -42,7 +42,6 @@ import (
 	"github.com/gravitational/teleport/lib/utils"
 	"github.com/gravitational/trace"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/tstranex/u2f"
 )
 
@@ -68,18 +67,10 @@ type Client struct {
 	transport *http.Transport
 }
 
-// NewTracer returns request tracer based on the logging level
-func NewTracer() roundtrip.RequestTracer {
-	if log.GetLevel() >= log.DebugLevel {
-		return roundtrip.NewWriterTracer(log.StandardLogger().Writer())
-	}
-	return roundtrip.NewNopTracer()
-}
-
 type dialContext func(in context.Context, network, _ string) (net.Conn, error)
 
 // NewTLSClient returns new client using TLS mutual authentication
-func NewTLSClient(addrs []utils.NetAddr, cfg *tls.Config) (*Client, error) {
+func NewTLSClient(addrs []utils.NetAddr, cfg *tls.Config, params ...roundtrip.ClientParam) (*Client, error) {
 	dialer := net.Dialer{
 		Timeout:   defaults.DefaultDialTimeout,
 		KeepAlive: defaults.ReverseTunnelAgentHeartbeatPeriod,
@@ -93,7 +84,8 @@ func NewTLSClient(addrs []utils.NetAddr, cfg *tls.Config) (*Client, error) {
 				return conn, nil
 			}
 		}
-		return conn, nil
+		// not wrapping on purpose to preserve the original error
+		return nil, err
 	}
 	transport := &http.Transport{
 		// notice that below roundtrip.Client is passed
@@ -111,9 +103,11 @@ func NewTLSClient(addrs []utils.NetAddr, cfg *tls.Config) (*Client, error) {
 		IdleConnTimeout: defaults.HTTPIdleTimeout,
 	}
 
-	roundtripClient, err := roundtrip.NewClient("https://"+teleport.APIDomain, CurrentVersion, roundtrip.HTTPClient(&http.Client{
+	params = append(params, roundtrip.HTTPClient(&http.Client{
 		Transport: transport,
 	}))
+
+	roundtripClient, err := roundtrip.NewClient("https://"+teleport.APIDomain, CurrentVersion, params...)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

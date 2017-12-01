@@ -51,6 +51,12 @@ const (
 )
 
 const (
+	// ComponentAuthority is TLS and SSH certificate authority components
+	ComponentAuthority = "authority"
+
+	// ComponentProcess is a main running process
+	ComponentProcess = "process"
+
 	// ComponentReverseTunnelServer is reverse tunnel server
 	// that together with agent establish a bi-directional SSH revers tunnel
 	// to bypass firewall restrictions

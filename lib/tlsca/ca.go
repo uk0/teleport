@@ -9,9 +9,16 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/gravitational/teleport"
+
 	"github.com/gravitational/trace"
 	"github.com/jonboulle/clockwork"
+	"github.com/sirupsen/logrus"
 )
+
+var log = logrus.WithFields(logrus.Fields{
+	trace.Component: teleport.ComponentAuthority,
+})
 
 // New returns new CA from PEM encoded certificate and private
 // key. Private Key is optional, if omitted CA won't be able to
@@ -86,17 +93,44 @@ type CertificateRequest struct {
 	DNSNames  []string
 }
 
+func (c *CertificateRequest) CheckAndSetDefaults() error {
+	if c.Clock == nil {
+		return trace.BadParameter("missing parameter Clock")
+	}
+	if c.PublicKey == nil {
+		return trace.BadParameter("missing parameter PublicKey")
+	}
+	if c.Subject.CommonName == "" {
+		return trace.BadParameter("missing parameter Subject.Common name")
+	}
+	if c.NotAfter.IsZero() {
+		return trace.BadParameter("missing parameter NotAfter")
+	}
+	return nil
+}
+
 func (ca *CertAuthority) GenerateCertificate(req CertificateRequest) ([]byte, error) {
+	if err := req.CheckAndSetDefaults(); err != nil {
+		return nil, trace.Wrap(err)
+	}
 	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
+	log.WithFields(logrus.Fields{
+		"not_after":   req.NotAfter,
+		"dns_names":   req.DNSNames,
+		"common_name": req.Subject.CommonName,
+		"org":         req.Subject.Organization,
+	}).Infof("Generating TLS certificate.")
+
 	template := &x509.Certificate{
-		SerialNumber:          serialNumber,
-		Subject:               req.Subject,
-		NotBefore:             req.Clock.Now().UTC(),
+		SerialNumber: serialNumber,
+		Subject:      req.Subject,
+		// substitue one minute to prevent "Not yet valid" errors on time scewed clusters
+		NotBefore:             req.Clock.Now().UTC().Add(-1 * time.Minute),
 		NotAfter:              req.NotAfter,
 		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
 		BasicConstraintsValid: true, // no intermediate certs allowed

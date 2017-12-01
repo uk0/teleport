@@ -17,10 +17,15 @@ limitations under the License.
 package auth
 
 import (
+	"crypto/x509"
+	"fmt"
 	"io/ioutil"
+	"path/filepath"
 	"strings"
 
 	"github.com/gravitational/teleport"
+	"github.com/gravitational/teleport/lib/defaults"
+	"github.com/gravitational/teleport/lib/tlsca"
 	"github.com/gravitational/teleport/lib/utils"
 
 	"github.com/gravitational/trace"
@@ -44,24 +49,32 @@ func Register(dataDir, token string, id IdentityID, servers []utils.NetAddr) err
 	if err != nil {
 		return trace.Wrap(err)
 	}
-
-	// connect to the auth server using a provisioning token. the auth server will
-	// only allow you to connect if it's a valid provisioning token it has generated
-	method, err := NewTokenAuth(id.HostUUID, tok)
+	tlsConfig := utils.TLSConfig()
+	certPath := filepath.Join(defaults.CACertFile)
+	certBytes, err := utils.ReadPath(certPath)
 	if err != nil {
-		return trace.Wrap(err)
+		if !trace.IsNotFound(err) {
+			return trace.Wrap(err)
+		}
+		message := fmt.Sprintf(`Your configuration is insecure! Registering without TLS certificate authority, to fix this warning add ca.cert to %v, you can get ca.cert using 'tctl auth export --type=tls > ca.cert'`, dataDir)
+		log.Warning(message)
+		tlsConfig.InsecureSkipVerify = true
+	} else {
+		cert, err := tlsca.ParseCertificatePEM(certBytes)
+		if err != nil {
+			return trace.Wrap(err, "failed to parse certificate at %v", certPath)
+		}
+		certPool := x509.NewCertPool()
+		certPool.AddCert(cert)
+		tlsConfig.RootCAs = certPool
 	}
-	client, err := NewTunClient(
-		"auth.client.register",
-		servers,
-		id.HostUUID,
-		method)
+	client, err := NewTLSClient(servers, tlsConfig)
 	if err != nil {
 		return trace.Wrap(err)
 	}
 	defer client.Close()
 
-	// create the host certificate and keys
+	// get the host certificate and keys
 	keys, err := client.RegisterUsingToken(tok, id.HostUUID, id.NodeName, id.Role)
 	if err != nil {
 		return trace.Wrap(err)

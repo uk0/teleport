@@ -38,9 +38,13 @@ import (
 
 	"github.com/gravitational/trace"
 	"github.com/pborman/uuid"
-	log "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/ssh"
 )
+
+var log = logrus.WithFields(logrus.Fields{
+	trace.Component: teleport.ComponentAuth,
+})
 
 // InitConfig is auth server init config
 type InitConfig struct {
@@ -142,7 +146,7 @@ func Init(cfg InitConfig, opts ...AuthServerOption) (*AuthServer, *Identity, err
 		if err := asrv.UpsertRole(role, backend.Forever); err != nil {
 			return nil, nil, trace.Wrap(err)
 		}
-		asrv.Infof("created role: %v", role)
+		log.Infof("Created role: %v.", role)
 	}
 	for i := range cfg.Authorities {
 		ca := cfg.Authorities[i]
@@ -154,13 +158,13 @@ func Init(cfg InitConfig, opts ...AuthServerOption) (*AuthServer, *Identity, err
 		if err := asrv.Trust.UpsertCertAuthority(ca); err != nil {
 			return nil, nil, trace.Wrap(err)
 		}
-		asrv.Infof("created trusted certificate authority: %q, type: %q", ca.GetName(), ca.GetType())
+		log.Infof("Created trusted certificate authority: %q, type: %q.", ca.GetName(), ca.GetType())
 	}
 	for _, tunnel := range cfg.ReverseTunnels {
 		if err := asrv.UpsertReverseTunnel(tunnel); err != nil {
 			return nil, nil, trace.Wrap(err)
 		}
-		asrv.Infof("created reverse tunnel: %v", tunnel)
+		log.Infof("Created reverse tunnel: %v.", tunnel)
 	}
 
 	// set cluster level config on the backend and then force a sync of the cache.
@@ -183,7 +187,7 @@ func Init(cfg InitConfig, opts ...AuthServerOption) (*AuthServer, *Identity, err
 	if err != nil {
 		return nil, nil, trace.Wrap(err)
 	}
-	asrv.Infof("updating cluster configuration: %v", cfg.ClusterConfig)
+	log.Infof("Updating cluster configuration: %v.", cfg.ClusterConfig)
 
 	// cluster name can only be set once. if it has already been set and we are
 	// trying to update it to something else, hard fail.
@@ -200,26 +204,26 @@ func Init(cfg InitConfig, opts ...AuthServerOption) (*AuthServer, *Identity, err
 			return nil, nil, trace.BadParameter("cannot rename cluster %q to %q: clusters cannot be renamed", cn.GetClusterName(), cfg.ClusterName.GetClusterName())
 		}
 	}
-	asrv.Debugf("cluster configuration: %v", cfg.ClusterName)
+	log.Debugf("Cluster configuration: %v.", cfg.ClusterName)
 
 	err = asrv.SetStaticTokens(cfg.StaticTokens)
 	if err != nil {
 		return nil, nil, trace.Wrap(err)
 	}
-	asrv.Infof("updating cluster configuration: %v", cfg.StaticTokens)
+	log.Infof("Updating cluster configuration: %v.", cfg.StaticTokens)
 
 	err = asrv.SetAuthPreference(cfg.AuthPreference)
 	if err != nil {
 		return nil, nil, trace.Wrap(err)
 	}
-	asrv.Infof("updating cluster configuration: %v", cfg.AuthPreference)
+	log.Infof("Updating cluster configuration: %v.", cfg.AuthPreference)
 
 	// always create the default namespace
 	err = asrv.UpsertNamespace(services.NewNamespace(defaults.Namespace))
 	if err != nil {
 		return nil, nil, trace.Wrap(err)
 	}
-	asrv.Infof("created namespace: %q", defaults.Namespace)
+	log.Infof("Created namespace: %q.", defaults.Namespace)
 
 	// always create a default admin role
 	defaultRole := services.NewAdminRole()
@@ -228,7 +232,7 @@ func Init(cfg InitConfig, opts ...AuthServerOption) (*AuthServer, *Identity, err
 		return nil, nil, trace.Wrap(err)
 	}
 	if !trace.IsAlreadyExists(err) {
-		asrv.Infof("created default admin role: %q", defaultRole.GetName())
+		log.Infof("Created default admin role: %q.", defaultRole.GetName())
 	}
 
 	// generate a user certificate authority if it doesn't exist
@@ -237,7 +241,7 @@ func Init(cfg InitConfig, opts ...AuthServerOption) (*AuthServer, *Identity, err
 			return nil, nil, trace.Wrap(err)
 		}
 
-		asrv.Infof("first start: generating user certificate authority")
+		log.Infof("First start: generating user certificate authority.")
 		priv, pub, err := asrv.GenerateKeyPair("")
 		if err != nil {
 			return nil, nil, trace.Wrap(err)
@@ -270,7 +274,7 @@ func Init(cfg InitConfig, opts ...AuthServerOption) (*AuthServer, *Identity, err
 			return nil, nil, trace.Wrap(err)
 		}
 
-		asrv.Infof("first start: generating host certificate authority")
+		log.Infof("First start: generating host certificate authority.")
 		priv, pub, err := asrv.GenerateKeyPair("")
 		if err != nil {
 			return nil, nil, trace.Wrap(err)
@@ -304,7 +308,7 @@ func Init(cfg InitConfig, opts ...AuthServerOption) (*AuthServer, *Identity, err
 			return nil, nil, trace.Wrap(err)
 		}
 	} else if len(hostCA.GetTLSPrivateKey()) == 0 {
-		asrv.Infof("migrate: generating TLS CA for existing host CA")
+		log.Infof("Migrate: generating TLS CA for existing host CA.")
 		keyPEM, certPEM, err := tlsca.GenerateSelfSignedCA(pkix.Name{
 			CommonName:   cfg.ClusterName.GetClusterName(),
 			Organization: []string{cfg.ClusterName.GetClusterName()},
@@ -323,7 +327,7 @@ func Init(cfg InitConfig, opts ...AuthServerOption) (*AuthServer, *Identity, err
 		warningMessage := "Starting teleport in insecure mode. This is " +
 			"dangerous! Sensitive information will be logged to console and " +
 			"certificates will not be verified. Proceed with caution!"
-		asrv.Warn(warningMessage)
+		log.Warn(warningMessage)
 	}
 
 	// read host keys from disk or create them if they don't exist
@@ -372,7 +376,7 @@ func migrateUsers(asrv *AuthServer) error {
 		if !ok {
 			continue
 		}
-		log.Infof("[MIGRATION] Legacy User: %v", user.GetName())
+		log.Infof("Migrating legacy user: %v.", user.GetName())
 
 		// create role for user and upsert to backend
 		role := services.RoleForUser(user)
@@ -411,7 +415,7 @@ func migrateRoles(asrv *AuthServer) error {
 		if err != nil {
 			return trace.Wrap(err)
 		}
-		log.Infof("[MIGRATION] Updated Role: %v", role.GetName())
+		log.Infof("Migrating updated role: %v", role.GetName())
 	}
 
 	return nil
@@ -463,7 +467,7 @@ func initKeys(a *AuthServer, dataDir string, id IdentityID) (*Identity, error) {
 			return nil, trace.Wrap(err)
 		}
 
-		a.Debugf("writing keys to disk for %v", id)
+		log.Debugf("Writing keys to disk for %v.", id)
 		err = writeKeys(dataDir, id, packedKeys.Key, packedKeys.Cert, packedKeys.TLSCert, packedKeys.TLSCACert)
 		if err != nil {
 			return nil, trace.Wrap(err)
@@ -505,32 +509,37 @@ type Identity struct {
 	TLSCACertBytes []byte
 	KeySigner      ssh.Signer
 	Cert           *ssh.Certificate
-	TLSCert        *tls.Certificate
 	ClusterName    string
 }
 
 // HasTSLConfig returns true if this identity has TLS certificate and private key
 func (i *Identity) HasTLSConfig() bool {
-	return len(i.TLSCACertBytes) != 0 && len(i.TLSCertBytes) != 0
+	return len(i.TLSCACertBytes) != 0 && len(i.TLSCertBytes) != 0 && len(i.TLSCACertBytes) != 0
 }
 
 // TLSConfig returns TLS config for mutual TLS authentication
 // can return NotFound error if there is no TLS credentials
 // provisioned yet
 func (i *Identity) TLSConfig() (*tls.Config, error) {
-	if len(i.TLSCACertBytes) == 0 || len(i.TLSCertBytes) == 0 || i.TLSCert == nil {
+	tlsConfig := utils.TLSConfig()
+	if !i.HasTLSConfig() {
 		return nil, trace.NotFound("no TLS credentials setup for this identity")
 	}
+	tlsCert, err := tls.X509KeyPair(i.TLSCertBytes, i.KeyBytes)
+	if err != nil {
+		return nil, trace.BadParameter("failed to parse private key: %v", err)
+	}
+
 	certPool := x509.NewCertPool()
-	parsedCert, err := x509.ParseCertificate(i.TLSCACertBytes)
+	parsedCert, err := tlsca.ParseCertificatePEM(i.TLSCACertBytes)
 	if err != nil {
 		return nil, trace.Wrap(err, "failed to parse CA certificate")
 	}
 	certPool.AddCert(parsedCert)
-	return &tls.Config{
-		Certificates: []tls.Certificate{*i.TLSCert},
-		RootCAs:      certPool,
-	}, nil
+	tlsConfig.Certificates = []tls.Certificate{tlsCert}
+	tlsConfig.RootCAs = certPool
+	tlsConfig.ClientCAs = certPool
+	return tlsConfig, nil
 }
 
 // IdentityID is a combination of role, host UUID, and node name.
@@ -551,36 +560,31 @@ func (id *IdentityID) String() string {
 }
 
 // ReadIdentityFromKeyPair reads TLS identity from key pair
-func ReadIdentityFromKeyPair(keyBytes, sshCertBytes, tlsCertBytes []byte) (*Identity, error) {
+func ReadIdentityFromKeyPair(keyBytes, sshCertBytes, tlsCertBytes, tlsCACertBytes []byte) (*Identity, error) {
 	identity, err := ReadSSHIdentityFromKeyPair(keyBytes, sshCertBytes)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-
 	if len(tlsCertBytes) != 0 {
-		tlsIdentity, err := ReadTLSIdentityFromKeyPair(keyBytes, tlsCertBytes)
+		// just to verify that identity parses properly for future use
+		_, err := ReadTLSIdentityFromKeyPair(keyBytes, tlsCertBytes, tlsCACertBytes)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
 		identity.TLSCertBytes = tlsCertBytes
-		identity.TLSCert = tlsIdentity.TLSCert
+		identity.TLSCACertBytes = tlsCACertBytes
 	}
 	return identity, nil
 }
 
 // ReadTLSIdentityFromKeyPair reads TLS identity from key pair
-func ReadTLSIdentityFromKeyPair(keyBytes, certBytes []byte) (*Identity, error) {
+func ReadTLSIdentityFromKeyPair(keyBytes, certBytes []byte, caCertBytes []byte) (*Identity, error) {
 	if len(keyBytes) == 0 {
 		return nil, trace.BadParameter("missing private key")
 	}
 
 	if len(certBytes) == 0 {
 		return nil, trace.BadParameter("missing certificate")
-	}
-
-	tlsCert, err := tls.X509KeyPair(certBytes, keyBytes)
-	if err != nil {
-		return nil, trace.BadParameter("failed to parse private key: %v", err)
 	}
 
 	cert, err := tlsca.ParseCertificatePEM(certBytes)
@@ -601,13 +605,19 @@ func ReadTLSIdentityFromKeyPair(keyBytes, certBytes []byte) (*Identity, error) {
 		return nil, trace.BadParameter("misssing cluster name")
 	}
 
-	return &Identity{
-		ID:           IdentityID{HostUUID: id.Username, Role: teleport.Role(id.Groups[0])},
-		ClusterName:  clusterName,
-		KeyBytes:     keyBytes,
-		TLSCertBytes: certBytes,
-		TLSCert:      &tlsCert,
-	}, nil
+	identity := &Identity{
+		ID:             IdentityID{HostUUID: id.Username, Role: teleport.Role(id.Groups[0])},
+		ClusterName:    clusterName,
+		KeyBytes:       keyBytes,
+		TLSCertBytes:   certBytes,
+		TLSCACertBytes: caCertBytes,
+	}
+
+	_, err = identity.TLSConfig()
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	return identity, nil
 }
 
 // ReadSSHIdentityFromKeyPair reads identity from initialized keypair
@@ -688,7 +698,7 @@ func ReadSSHIdentityFromKeyPair(keyBytes, certBytes []byte) (*Identity, error) {
 // key storage (dataDir).
 func ReadIdentity(dataDir string, id IdentityID) (i *Identity, err error) {
 	path := keysPath(dataDir, id)
-	log.Debugf("[INIT] reading keys from disk: %v", path)
+	log.Debugf("Reading keys from disk: %v.", path)
 
 	keyBytes, err := utils.ReadPath(path.key)
 	if err != nil {
@@ -708,7 +718,12 @@ func ReadIdentity(dataDir string, id IdentityID) (i *Identity, err error) {
 		}
 	}
 
-	return ReadIdentityFromKeyPair(keyBytes, sshCertBytes, tlsCertBytes)
+	tlsCACertBytes, err := utils.ReadPath(path.tlsCACert)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	return ReadIdentityFromKeyPair(keyBytes, sshCertBytes, tlsCertBytes, tlsCACertBytes)
 }
 
 // WriteIdentity writes identity keypair to disk

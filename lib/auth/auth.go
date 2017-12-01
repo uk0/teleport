@@ -25,6 +25,7 @@ package auth
 
 import (
 	"context"
+	"crypto/x509"
 	"fmt"
 	"net/url"
 	"sync"
@@ -43,7 +44,6 @@ import (
 	"github.com/gravitational/trace"
 	"github.com/jonboulle/clockwork"
 	saml2 "github.com/russellhaering/gosaml2"
-	log "github.com/sirupsen/logrus"
 	"github.com/tstranex/u2f"
 	"golang.org/x/crypto/ssh"
 )
@@ -95,9 +95,6 @@ func NewAuthServer(cfg *InitConfig, opts ...AuthServerOption) *AuthServer {
 	}
 	closeCtx, cancelFunc := context.WithCancel(context.TODO())
 	as := AuthServer{
-		Entry: log.WithFields(log.Fields{
-			trace.Component: teleport.ComponentAuth,
-		}),
 		bk:                   cfg.Backend,
 		Authority:            cfg.Authority,
 		Trust:                cfg.Trust,
@@ -136,8 +133,6 @@ func NewAuthServer(cfg *InitConfig, opts ...AuthServerOption) *AuthServer {
 //   - same for users and their sessions
 //   - checks public keys to see if they're signed by it (can be trusted or not)
 type AuthServer struct {
-	*log.Entry
-
 	lock          sync.Mutex
 	oidcClients   map[string]*oidcClient
 	samlProviders map[string]*samlProvider
@@ -498,6 +493,28 @@ func (s *AuthServer) GenerateToken(roles teleport.Roles, ttl time.Duration) (str
 	return token, nil
 }
 
+// ClientCertPool returns trusted x509 cerificate authority pool
+func (s *AuthServer) ClientCertPool() (*x509.CertPool, error) {
+	pool := x509.NewCertPool()
+	authorities, err := s.GetCertAuthorities(services.HostCA, false)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	for _, auth := range authorities {
+		tlsCertBytes := []byte(auth.GetTLSCert())
+		// could happen during migrations, as not all remote clusters
+		// have upgraded and updated TLS certificates
+		if len(tlsCertBytes) != 0 {
+			cert, err := tlsca.ParseCertificatePEM(tlsCertBytes)
+			if err != nil {
+				return nil, trace.Wrap(err)
+			}
+			pool.AddCert(cert)
+		}
+	}
+	return pool, nil
+}
+
 // GenerateServerKeys generates new host private keys and certificates (signed
 // by the host certificate authority) for a node.
 func (s *AuthServer) GenerateServerKeys(hostID string, nodeName string, roles teleport.Roles) (*PackedKeys, error) {
@@ -516,6 +533,11 @@ func (s *AuthServer) GenerateServerKeys(hostID string, nodeName string, roles te
 	pubKey, _, _, _, err := ssh.ParseAuthorizedKey(pubSSHKey)
 	if err != nil {
 		return nil, trace.Wrap(err)
+	}
+
+	cryptoPubKey, ok := pubKey.(ssh.CryptoPublicKey)
+	if !ok {
+		return nil, trace.BadParameter("failed to cast key type")
 	}
 
 	// get the certificate authority that will be signing the public key of the host
@@ -555,12 +577,14 @@ func (s *AuthServer) GenerateServerKeys(hostID string, nodeName string, roles te
 	}
 	certRequest := tlsca.CertificateRequest{
 		Clock:     s.clock,
-		PublicKey: pubKey,
+		PublicKey: cryptoPubKey.CryptoPublicKey(),
 		Subject:   identity.Subject(),
+		NotAfter:  s.clock.Now().UTC().Add(defaults.CATTL),
 	}
-	// Auth server will resolve by builtin DNS name,
-	// we will improve this logic later, but this is OK default for now
-	if roles.Include(teleport.RoleAuth) {
+	// HTTPS requests need to specify DNS name that should be present in the
+	// certificate as one of the DNS Names. It is not known in advance,
+	// that is why there is a default one for all certificates
+	if roles.Include(teleport.RoleAuth) || roles.Include(teleport.RoleAdmin) {
 		certRequest.DNSNames = []string{teleport.APIDomain}
 	}
 	hostTLSCert, err := tlsAuthority.GenerateCertificate(certRequest)
@@ -627,7 +651,7 @@ func (s *AuthServer) checkTokenTTL(token string) bool {
 // If a token was generated with a TTL=0, it means it's a single-use token and it gets destroyed
 // after a successful registration.
 func (s *AuthServer) RegisterUsingToken(token, hostID string, nodeName string, role teleport.Role) (*PackedKeys, error) {
-	s.Infof("node %q [%v] trying to join with role: %v", nodeName, hostID, role)
+	log.Infof("node %q [%v] trying to join with role: %v", nodeName, hostID, role)
 	if hostID == "" {
 		return nil, trace.BadParameter("HostID cannot be empty")
 	}
@@ -640,14 +664,14 @@ func (s *AuthServer) RegisterUsingToken(token, hostID string, nodeName string, r
 	roles, err := s.ValidateToken(token)
 	if err != nil {
 		msg := fmt.Sprintf("%q [%v] can not join the cluster with role %s, token error: %v", nodeName, hostID, role, err)
-		s.Warn(msg)
+		log.Warn(msg)
 		return nil, trace.AccessDenied(msg)
 	}
 
 	// make sure the caller is requested wthe role allowed by the token
 	if !roles.Include(role) {
 		msg := fmt.Sprintf("%q [%v] can not join the cluster, the token does not allow %q role", nodeName, hostID, role)
-		s.Warn(msg)
+		log.Warn(msg)
 		return nil, trace.BadParameter(msg)
 	}
 	if !s.checkTokenTTL(token) {
@@ -659,7 +683,7 @@ func (s *AuthServer) RegisterUsingToken(token, hostID string, nodeName string, r
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	s.Infof("node %q [%v] joined the cluster", nodeName, hostID)
+	log.Infof("node %q [%v] joined the cluster", nodeName, hostID)
 	return keys, nil
 }
 
@@ -773,7 +797,7 @@ func (s *AuthServer) NewWebSession(userName string) (services.WebSession, error)
 		}
 		// apply traits to role to fill in any role variables
 		roles = append(roles, role.ApplyTraits(user.GetTraits()))
-		s.Debugf("Generating user certificate for %v with role %v. Allow logins: %v. Deny logins: %v",
+		log.Debugf("Generating user certificate for %v with role %v. Allow logins: %v. Deny logins: %v",
 			user.GetName(), role.GetName(), role.GetLogins(services.Allow), role.GetLogins(services.Deny))
 	}
 	sessionTTL := roles.AdjustSessionTTL(defaults.CertDuration)
@@ -884,7 +908,7 @@ func (a *AuthServer) syncCachedClusterConfigLoop() {
 		case <-ticker.C:
 			err := a.syncCachedClusterConfig()
 			if err != nil {
-				a.Warnf("failed to sync cluster config: %v", err)
+				log.Warnf("Failed to sync cluster config: %v.", err)
 				continue
 			}
 		}

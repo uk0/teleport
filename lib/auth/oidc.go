@@ -17,7 +17,6 @@ import (
 	"github.com/coreos/go-oidc/oauth2"
 	"github.com/coreos/go-oidc/oidc"
 	"github.com/gravitational/trace"
-	log "github.com/sirupsen/logrus"
 )
 
 func (s *AuthServer) getOIDCClient(conn services.OIDCConnector) (*oidc.Client, error) {

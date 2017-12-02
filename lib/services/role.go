@@ -1218,8 +1218,11 @@ type RoleSpecV2 struct {
 	ForwardAgent bool `json:"forward_agent" yaml:"forward_agent"`
 }
 
-// AccessChecker interface implements access checks for given role
+// AccessChecker interface implements access checks for given role or role set
 type AccessChecker interface {
+	// HasRole checks if the checker includes the role
+	HasRole(role string) bool
+
 	// CheckAccessToServer checks access to server.
 	CheckAccessToServer(login string, server Server) error
 
@@ -1352,6 +1355,16 @@ func MatchLabels(selector map[string]string, target map[string]string) bool {
 		}
 	}
 	return true
+}
+
+// HasRole checks if the role set has the role
+func (set RoleSet) HasRole(role string) bool {
+	for _, r := range set {
+		if r.GetName() == role {
+			return true
+		}
+	}
+	return false
 }
 
 // AdjustSessionTTL will reduce the requested ttl to lowest max allowed TTL

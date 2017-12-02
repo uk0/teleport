@@ -67,8 +67,18 @@ func (a *AuthWithRoles) authConnectorAction(namespace string, resource string, v
 			return trace.Wrap(err)
 		}
 	}
-
 	return nil
+}
+
+// AuthenticateWebUser authenticates web user, creates and  returns web session
+// in case if authentication is successfull
+func (a *AuthWithRoles) AuthenticateWebUser(req AuthenticateWebUserRequest) (services.WebSession, error) {
+	// authentication request has it's own authentication, however this limits the requests
+	// types to proxies to make it harder to break
+	if !a.checker.HasRole(string(teleport.RoleProxy)) {
+		return nil, trace.AccessDenied("this request can be only executed by proxy")
+	}
+	return a.authServer.AuthenticateWebUser(req)
 }
 
 func (a *AuthWithRoles) GetSessions(namespace string) ([]session.Session, error) {

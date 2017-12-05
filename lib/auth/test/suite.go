@@ -64,11 +64,13 @@ func (s *AuthSuite) GenerateHostCert(c *C) {
 		services.HostCertParams{
 			PrivateCASigningKey: priv,
 			PublicHostKey:       pub,
-			HostID:              "00000000-0000-0000-0000-000000000000",
-			NodeName:            "auth.example.com",
-			ClusterName:         "example.com",
-			Roles:               teleport.Roles{teleport.RoleAdmin},
-			TTL:                 time.Hour,
+			Principals: []string{
+				"00000000-0000-0000-0000-000000000000",
+				"auth.example.com",
+			},
+			ClusterName: "example.com",
+			Roles:       teleport.Roles{teleport.RoleAdmin},
+			TTL:         time.Hour,
 		})
 	c.Assert(err, IsNil)
 

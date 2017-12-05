@@ -729,11 +729,14 @@ func (s *APIServer) generateKeyPair(auth ClientI, w http.ResponseWriter, r *http
 
 type generateHostCertReq struct {
 	Key         []byte         `json:"key"`
-	HostID      string         `json:"hostname"`
-	NodeName    string         `json:"node_name"`
+	Principals  []string       `json:"principals"`
 	ClusterName string         `json:"auth_domain"`
 	Roles       teleport.Roles `json:"roles"`
 	TTL         time.Duration  `json:"ttl"`
+
+	// Deprecated: Remove in Teleport 2.5.0.
+	HostID   string `json:"hostname"`
+	NodeName string `json:"node_name"`
 }
 
 func (s *APIServer) generateHostCert(auth ClientI, w http.ResponseWriter, r *http.Request, _ httprouter.Params, version string) (interface{}, error) {
@@ -742,7 +745,13 @@ func (s *APIServer) generateHostCert(auth ClientI, w http.ResponseWriter, r *htt
 		return nil, trace.Wrap(err)
 	}
 
-	cert, err := auth.GenerateHostCert(req.Key, req.HostID, req.NodeName, req.ClusterName, req.Roles, req.TTL)
+	// Deprecated: Remove in Teleport 2.5.0.
+	principals := req.Principals
+	if len(principals) == 0 {
+		principals = utils.PrincipalsForHostCert(req.HostID, req.NodeName, req.ClusterName, req.Roles)
+	}
+
+	cert, err := auth.GenerateHostCert(req.Key, principals, req.ClusterName, req.Roles, req.TTL)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

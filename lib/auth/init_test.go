@@ -72,8 +72,7 @@ func (s *AuthInitSuite) TestReadIdentity(c *C) {
 	cert, err := t.GenerateHostCert(services.HostCertParams{
 		PrivateCASigningKey: priv,
 		PublicHostKey:       pub,
-		HostID:              "id1",
-		NodeName:            "node-name",
+		Principals:          utils.PrincipalsForHostCert("id1", "node-name", "example.com", teleport.Roles{teleport.RoleNode}),
 		ClusterName:         "example.com",
 		Roles:               teleport.Roles{teleport.RoleNode},
 		TTL:                 0,
@@ -93,8 +92,7 @@ func (s *AuthInitSuite) TestReadIdentity(c *C) {
 	bytes, err := t.GenerateHostCert(services.HostCertParams{
 		PrivateCASigningKey: priv,
 		PublicHostKey:       pub,
-		HostID:              "id1",
-		NodeName:            "node-name",
+		Principals:          utils.PrincipalsForHostCert("id1", "node-name", "example.com", teleport.Roles{teleport.RoleNode}),
 		ClusterName:         "example.com",
 		Roles:               teleport.Roles{teleport.RoleNode},
 		TTL:                 ttl,
@@ -120,8 +118,7 @@ func (s *AuthInitSuite) TestBadIdentity(c *C) {
 	cert, err := t.GenerateHostCert(services.HostCertParams{
 		PrivateCASigningKey: priv,
 		PublicHostKey:       pub,
-		HostID:              "id2",
-		NodeName:            "",
+		Principals:          utils.PrincipalsForHostCert("id2", "", "", teleport.Roles{teleport.RoleNode}),
 		ClusterName:         "",
 		Roles:               teleport.Roles{teleport.RoleNode},
 		TTL:                 0,
@@ -135,8 +132,7 @@ func (s *AuthInitSuite) TestBadIdentity(c *C) {
 	cert, err = t.GenerateHostCert(services.HostCertParams{
 		PrivateCASigningKey: priv,
 		PublicHostKey:       pub,
-		HostID:              "example.com",
-		NodeName:            "",
+		Principals:          utils.PrincipalsForHostCert("example.com", "", "", teleport.Roles{teleport.RoleNode}),
 		ClusterName:         "",
 		Roles:               teleport.Roles{teleport.RoleNode},
 		TTL:                 0,
@@ -150,8 +146,7 @@ func (s *AuthInitSuite) TestBadIdentity(c *C) {
 	cert, err = t.GenerateHostCert(services.HostCertParams{
 		PrivateCASigningKey: priv,
 		PublicHostKey:       pub,
-		HostID:              "example.com",
-		NodeName:            "",
+		Principals:          utils.PrincipalsForHostCert("example.com", "", "id1", teleport.Roles{teleport.Role("bad role")}),
 		ClusterName:         "id1",
 		Roles:               teleport.Roles{teleport.Role("bad role")},
 		TTL:                 0,

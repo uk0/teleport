@@ -194,9 +194,10 @@ func (a *AuthServer) GetDomainName() (string, error) {
 	return cn.GetClusterName(), nil
 }
 
-// GenerateHostCert uses the private key of the CA to sign the public key of the host
-// (along with meta data like host ID, node name, roles, and ttl) to generate a host certificate.
-func (s *AuthServer) GenerateHostCert(hostPublicKey []byte, hostID, nodeName, clusterName string, roles teleport.Roles, ttl time.Duration) ([]byte, error) {
+// GenerateHostCert uses the private key of the CA to sign the public
+// key of the host (along with meta data like host ID, node name, roles, and
+// ttl) to generate a host certificate.
+func (s *AuthServer) GenerateHostCert(hostPublicKey []byte, principals []string, clusterName string, roles teleport.Roles, ttl time.Duration) ([]byte, error) {
 	domainName, err := s.GetDomainName()
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -221,8 +222,7 @@ func (s *AuthServer) GenerateHostCert(hostPublicKey []byte, hostID, nodeName, cl
 	return s.Authority.GenerateHostCert(services.HostCertParams{
 		PrivateCASigningKey: caPrivateKey,
 		PublicHostKey:       hostPublicKey,
-		HostID:              hostID,
-		NodeName:            nodeName,
+		Principals:          principals,
 		ClusterName:         clusterName,
 		Roles:               roles,
 		TTL:                 ttl,
@@ -500,7 +500,7 @@ func (s *AuthServer) GenerateToken(roles teleport.Roles, ttl time.Duration) (str
 // GenerateServerKeys generates new host private keys and certificates (signed
 // by the host certificate authority) for a node.
 func (s *AuthServer) GenerateServerKeys(hostID string, nodeName string, roles teleport.Roles) (*PackedKeys, error) {
-	domainName, err := s.GetDomainName()
+	clusterName, err := s.GetDomainName()
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -511,8 +511,11 @@ func (s *AuthServer) GenerateServerKeys(hostID string, nodeName string, roles te
 		return nil, trace.Wrap(err)
 	}
 
+	// build principals list
+	principals := utils.PrincipalsForHostCert(hostID, nodeName, clusterName, roles)
+
 	// generate host certificate with an infinite ttl
-	c, err := s.GenerateHostCert(pub, hostID, nodeName, domainName, roles, 0)
+	c, err := s.GenerateHostCert(pub, principals, clusterName, roles, 0)
 	if err != nil {
 		log.Warningf("[AUTH] Node %q [%v] can not join: certificate generation error: %v", nodeName, hostID, err)
 		return nil, trace.Wrap(err)

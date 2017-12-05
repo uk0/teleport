@@ -234,7 +234,7 @@ func (a *AuthCommand) generateHostKeys(clusterApi *auth.TunClient) error {
 	}
 	clusterName := cn.GetClusterName()
 
-	key.Cert, err = clusterApi.GenerateHostCert(key.Pub, principals[0], principals[0], clusterName, teleport.Roles{teleport.RoleNode}, 0)
+	key.Cert, err = clusterApi.GenerateHostCert(key.Pub, principals, clusterName, teleport.Roles{teleport.RoleNode}, 0)
 	if err != nil {
 		return trace.Wrap(err)
 	}

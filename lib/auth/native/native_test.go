@@ -124,8 +124,7 @@ func (s *NativeSuite) TestBuildPrincipals(c *C) {
 			services.HostCertParams{
 				PrivateCASigningKey: caPrivateKey,
 				PublicHostKey:       hostPublicKey,
-				HostID:              tt.inHostID,
-				NodeName:            tt.inNodeName,
+				Principals:          utils.PrincipalsForHostCert(tt.inHostID, tt.inNodeName, tt.inClusterName, tt.inRoles),
 				ClusterName:         tt.inClusterName,
 				Roles:               tt.inRoles,
 				TTL:                 time.Hour,

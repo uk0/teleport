@@ -173,16 +173,20 @@ type CertAuthority interface {
 	V2() *CertAuthorityV2
 	// String returns human readable version of the CertAuthority
 	String() string
-	// TLSCA returns TLS certificate authority
+	// TLSCA returns first TLS certificate authority from the list of key pairs
 	TLSCA() (*tlsca.CertAuthority, error)
-	// SetTLSPrivateKey returns TLS private key
-	SetTLSPrivateKey(key string)
-	// GetTLSPrivateKey returns TLS private key
-	GetTLSPrivateKey() string
-	// GetTLSCert returns TLS cert
-	GetTLSCert() string
-	// SetTLSCert sets TLS cert
-	SetTLSCert(cert string)
+	// SetTLSKeyPairs sets TLS key pairs
+	SetTLSKeyPairs(keyPairs []TLSKeyPair)
+	// GetTLSKeyPairs returns first PEM encoded TLS cert
+	GetTLSKeyPairs() []TLSKeyPair
+}
+
+// TLSKeyPair is a TLS key pair
+type TLSKeyPair struct {
+	// Cert is PEM encoded TLS cert
+	Cert []byte `json:"cert"`
+	// Key is PEM encoded TLS key
+	Key []byte `json:"key"`
 }
 
 // NewCertAuthority returns new cert authority
@@ -237,30 +241,20 @@ type CertAuthorityV2 struct {
 
 // TLSCA returns TLS certificate authority
 func (c *CertAuthorityV2) TLSCA() (*tlsca.CertAuthority, error) {
-	if len(c.Spec.TLSCert) == 0 {
-		return nil, trace.BadParameter("no TLS cert found for CA")
+	if len(c.Spec.TLSKeyPairs) == 0 {
+		return nil, trace.BadParameter("no TLS key pairs found for certificate authority")
 	}
-	return tlsca.New([]byte(c.Spec.TLSCert), []byte(c.Spec.TLSPrivateKey))
+	return tlsca.New(c.Spec.TLSKeyPairs[0].Cert, c.Spec.TLSKeyPairs[0].Key)
 }
 
-// SetTLSPrivateKey returns TLS private key
-func (c *CertAuthorityV2) SetTLSPrivateKey(key string) {
-	c.Spec.TLSPrivateKey = key
+// SetTLSPrivateKey sets TLS key pairs
+func (c *CertAuthorityV2) SetTLSKeyPairs(pairs []TLSKeyPair) {
+	c.Spec.TLSKeyPairs = pairs
 }
 
-// GetTLSPrivateKey returns TLS private key
-func (c *CertAuthorityV2) GetTLSPrivateKey() string {
-	return c.Spec.TLSPrivateKey
-}
-
-// GetTLSCert returns TLS cert
-func (c *CertAuthorityV2) GetTLSCert() string {
-	return c.Spec.TLSCert
-}
-
-// SetTLSCert sets TLS cert
-func (c *CertAuthorityV2) SetTLSCert(cert string) {
-	c.Spec.TLSCert = cert
+// GetTLSPrivateKey returns TLS key pairs
+func (c *CertAuthorityV2) GetTLSKeyPairs() []TLSKeyPair {
+	return c.Spec.TLSKeyPairs
 }
 
 // GetMetadata returns object metadata
@@ -487,10 +481,8 @@ type CertAuthoritySpecV2 struct {
 	Roles []string `json:"roles,omitempty"`
 	// RoleMap specifies role mappings to remote roles
 	RoleMap RoleMap `json:"role_map,omitempty"`
-	// TLSCert is a TLS certificate
-	TLSCert string `json:"tls_cert,omitempty"`
-	// TLSPrivateKey is a TLS private key
-	TLSPrivateKey string `json:"tls_private_key,omitempty"`
+	// TLS is a list of TLS key pairs
+	TLSKeyPairs []TLSKeyPair `json:"tls_key_pairs,omitempty"`
 }
 
 // CertAuthoritySpecV2Schema is JSON schema for cert authority V2
@@ -519,8 +511,17 @@ const CertAuthoritySpecV2Schema = `{
         "type": "string"
       }
     },
-    "tls_cert": {"type": "string"},
-    "tls_private_key": {"type": "string"},
+    "tls_key_pairs":  {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+           "cert": {"type": "string"},
+           "key": {"type": "string"}
+        }
+      }
+    },
     "role_map": %v
   }
 }`

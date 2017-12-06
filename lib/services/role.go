@@ -1357,6 +1357,15 @@ func MatchLabels(selector map[string]string, target map[string]string) bool {
 	return true
 }
 
+// StringSlice returns a slice with role names
+func (set RoleSet) StringSlice() []string {
+	out := make([]string, len(set))
+	for i, r := range set {
+		out[i] = r.GetName()
+	}
+	return out
+}
+
 // HasRole checks if the role set has the role
 func (set RoleSet) HasRole(role string) bool {
 	for _, r := range set {

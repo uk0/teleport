@@ -836,6 +836,36 @@ func (c *Client) CreateWebSession(user string) (services.WebSession, error) {
 	return services.GetWebSessionMarshaler().UnmarshalWebSession(out.Bytes())
 }
 
+// AuthenticateWebUser authenticates web user, creates and  returns web session
+// in case if authentication is successfull
+func (c *Client) AuthenticateWebUser(req AuthenticateWebUserRequest) (services.WebSession, error) {
+	out, err := c.PostJSON(
+		c.Endpoint("users", req.Username, "web", "authenticate"),
+		req,
+	)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	return services.GetWebSessionMarshaler().UnmarshalWebSession(out.Bytes())
+}
+
+// AuthenticateSSHUser authenticates SSH console user, creates and  returns a pair of signed TLS and SSH
+// short lived certificates as a result
+func (c *Client) AuthenticateSSHUser(req AuthenticateSSHUserRequest) (*SSHLoginResponse, error) {
+	out, err := c.PostJSON(
+		c.Endpoint("users", req.Username, "ssh", "authenticate"),
+		req,
+	)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	var re SSHLoginResponse
+	if err := json.Unmarshal(out.Bytes(), &re); err != nil {
+		return nil, trace.Wrap(err)
+	}
+	return &re, nil
+}
+
 // GetWebSessionInfo checks if a web sesion is valid, returns session id in case if
 // it is valid, or error otherwise.
 func (c *Client) GetWebSessionInfo(user string, sid string) (services.WebSession, error) {
@@ -1969,4 +1999,10 @@ type ClientI interface {
 	GenerateServerKeys(hostID string, nodeName string, roles teleport.Roles) (*PackedKeys, error)
 	// GetDialer returns dialer that will connect to auth server API
 	GetDialer() AccessPointDialer
+	// AuthenticateWebUser authenticates web user, creates and  returns web session
+	// in case if authentication is successfull
+	AuthenticateWebUser(req AuthenticateWebUserRequest) (services.WebSession, error)
+	// AuthenticateSSHUser authenticates SSH console user, creates and  returns a pair of signed TLS and SSH
+	// short lived certificates as a result
+	AuthenticateSSHUser(req AuthenticateSSHUserRequest) (*SSHLoginResponse, error)
 }

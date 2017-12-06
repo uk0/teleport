@@ -83,6 +83,8 @@ type WebSessionSpecV2 struct {
 	Pub []byte `json:"pub"`
 	// Priv is a private OpenSSH key used to auth with SSH nodes
 	Priv []byte `json:"priv,omitempty"`
+	// TLSCert is a TLS certificate used to auth with auth server
+	TLSCert []byte `json:"tls_cert,omitempty"`
 	// BearerToken is a special bearer token used for additional
 	// bearer authentication
 	BearerToken string `json:"bearer_token"`
@@ -203,6 +205,7 @@ const WebSessionSpecV2Schema = `{
     "user": {"type": "string"},
     "pub": {"type": "string"},
     "priv": {"type": "string"},
+    "tls_cert": {"type": "string"},
     "bearer_token": {"type": "string"},
     "bearer_token_expires": {"type": "string"},
     "expires": {"type": "string"}%v

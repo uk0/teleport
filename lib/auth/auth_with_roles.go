@@ -81,6 +81,17 @@ func (a *AuthWithRoles) AuthenticateWebUser(req AuthenticateWebUserRequest) (ser
 	return a.authServer.AuthenticateWebUser(req)
 }
 
+// AuthenticateSSHUser authenticates SSH console user, creates and  returns a pair of signed TLS and SSH
+// short lived certificates as a result
+func (a *AuthWithRoles) AuthenticateSSHUser(req AuthenticateSSHUserRequest) (*SSHLoginResponse, error) {
+	// authentication request has it's own authentication, however this limits the requests
+	// types to proxies to make it harder to break
+	if !a.checker.HasRole(string(teleport.RoleProxy)) {
+		return nil, trace.AccessDenied("this request can be only executed by proxy")
+	}
+	return a.authServer.AuthenticateSSHUser(req)
+}
+
 func (a *AuthWithRoles) GetSessions(namespace string) ([]session.Session, error) {
 	if err := a.action(namespace, services.KindSSHSession, services.VerbList); err != nil {
 		return nil, trace.Wrap(err)
@@ -489,18 +500,17 @@ func (a *AuthWithRoles) GenerateUserCert(key []byte, username string, ttl time.D
 	} else {
 		user = a.user
 	}
-
-	// adjust session ttl to the smaller of two values: the session
-	// ttl requested in tsh or the session ttl for the role.
-	sessionTTL := checker.AdjustSessionTTL(ttl)
-
-	// check signing TTL and return a list of allowed logins
-	allowedLogins, err := checker.CheckLoginDuration(sessionTTL)
+	certs, err := a.authServer.generateUserCert(certRequest{
+		user:          user,
+		roles:         checker,
+		ttl:           ttl,
+		compatibility: compatibility,
+		publicKey:     key,
+	})
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	return a.authServer.GenerateUserCert(
-		key, user, allowedLogins, sessionTTL, checker.CanForwardAgents(), compatibility)
+	return certs.sshPEM, nil
 }
 
 func (a *AuthWithRoles) CreateSignupToken(user services.UserV1, ttl time.Duration) (token string, e error) {

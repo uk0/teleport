@@ -296,18 +296,17 @@ func Init(cfg InitConfig, opts ...AuthServerOption) (*AuthServer, *Identity, err
 				Namespace: defaults.Namespace,
 			},
 			Spec: services.CertAuthoritySpecV2{
-				ClusterName:   cfg.ClusterName.GetClusterName(),
-				Type:          services.HostCA,
-				SigningKeys:   [][]byte{priv},
-				CheckingKeys:  [][]byte{pub},
-				TLSCert:       string(certPEM),
-				TLSPrivateKey: string(keyPEM),
+				ClusterName:  cfg.ClusterName.GetClusterName(),
+				Type:         services.HostCA,
+				SigningKeys:  [][]byte{priv},
+				CheckingKeys: [][]byte{pub},
+				TLSKeyPairs:  []services.TLSKeyPair{{CertPEM: certPEM, KeyPEM: keyPEM}},
 			},
 		}
 		if err := asrv.Trust.UpsertCertAuthority(hostCA); err != nil {
 			return nil, nil, trace.Wrap(err)
 		}
-	} else if len(hostCA.GetTLSPrivateKey()) == 0 {
+	} else if len(hostCA.GetTLSKeyPairs()) == 0 {
 		log.Infof("Migrate: generating TLS CA for existing host CA.")
 		keyPEM, certPEM, err := tlsca.GenerateSelfSignedCA(pkix.Name{
 			CommonName:   cfg.ClusterName.GetClusterName(),
@@ -316,8 +315,7 @@ func Init(cfg InitConfig, opts ...AuthServerOption) (*AuthServer, *Identity, err
 		if err != nil {
 			return nil, nil, trace.Wrap(err)
 		}
-		hostCA.SetTLSCert(string(certPEM))
-		hostCA.SetTLSPrivateKey(string(keyPEM))
+		hostCA.SetTLSKeyPairs([]services.TLSKeyPair{{CertPEM: certPEM, KeyPEM: keyPEM}})
 		if err := asrv.Trust.UpsertCertAuthority(hostCA); err != nil {
 			return nil, nil, trace.Wrap(err)
 		}

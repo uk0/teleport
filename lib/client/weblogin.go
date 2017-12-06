@@ -48,17 +48,6 @@ const (
 	WSS = "wss"
 )
 
-// SSHLoginResponse is a response returned by web proxy
-type SSHLoginResponse struct {
-	// User contains a logged in user informationn
-	Username string `json:"username"`
-	// Cert is a signed certificate
-	Cert []byte `json:"cert"`
-	// HostSigners is a list of signing host public keys
-	// trusted by proxy
-	HostSigners []services.CertAuthorityV1 `json:"host_signers"`
-}
-
 // SSOLoginConsoleReq is used to SSO for tsh
 type SSOLoginConsoleReq struct {
 	RedirectURL   string        `json:"redirect_url"`

@@ -89,6 +89,8 @@ func NewAPIServer(config *APIConfig) http.Handler {
 	srv.POST("/:version/users/:user/web/signin", srv.withAuth(srv.signIn))
 	srv.GET("/:version/users/:user/web/signin/preauth", srv.withAuth(srv.preAuthenticatedSignIn))
 	srv.POST("/:version/users/:user/web/sessions", srv.withAuth(srv.createWebSession))
+	srv.POST("/:version/users/:user/web/authenticate", srv.withAuth(srv.authenticateWebUser))
+	srv.POST("/:version/users/:user/ssh/authenticate", srv.withAuth(srv.authenticateSSHUser))
 	srv.GET("/:version/users/:user/web/sessions/:sid", srv.withAuth(srv.getWebSession))
 	srv.DELETE("/:version/users/:user/web/sessions/:sid", srv.withAuth(srv.deleteWebSession))
 	srv.GET("/:version/signuptokens/:token", srv.withAuth(srv.getSignupTokenData))
@@ -592,6 +594,28 @@ func (s *APIServer) createWebSession(auth ClientI, w http.ResponseWriter, r *htt
 		return nil, trace.Wrap(err)
 	}
 	return rawMessage(services.GetWebSessionMarshaler().MarshalWebSession(sess, services.WithVersion(version)))
+}
+
+func (s *APIServer) authenticateWebUser(auth ClientI, w http.ResponseWriter, r *http.Request, p httprouter.Params, version string) (interface{}, error) {
+	var req AuthenticateWebUserRequest
+	if err := httplib.ReadJSON(r, &req); err != nil {
+		return nil, trace.Wrap(err)
+	}
+	req.Username = p.ByName("user")
+	sess, err := auth.AuthenticateWebUser(req)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	return rawMessage(services.GetWebSessionMarshaler().MarshalWebSession(sess, services.WithVersion(version)))
+}
+
+func (s *APIServer) authenticateSSHUser(auth ClientI, w http.ResponseWriter, r *http.Request, p httprouter.Params, version string) (interface{}, error) {
+	var req AuthenticateSSHUserRequest
+	if err := httplib.ReadJSON(r, &req); err != nil {
+		return nil, trace.Wrap(err)
+	}
+	req.Username = p.ByName("user")
+	return auth.AuthenticateSSHUser(req)
 }
 
 func (s *APIServer) changePassword(auth ClientI, w http.ResponseWriter, r *http.Request, p httprouter.Params, version string) (interface{}, error) {
